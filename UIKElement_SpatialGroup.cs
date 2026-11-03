@@ -76,7 +76,7 @@ namespace UIKit
                 _ => Vector2.right,
             };
             float minDot = Mathf.Cos(maxAngle * Mathf.Deg2Rad);
-            Vector2 origin = _from.transform.position;
+            Vector2 origin = transform.InverseTransformPoint(_from.transform.position);
 
             UIKTarget nearest = null;
             float nearestScore = float.PositiveInfinity;
@@ -88,7 +88,7 @@ namespace UIKit
                     continue;
                 }
 
-                Vector2 offset = (Vector2)target.transform.position - origin;
+                Vector2 offset = (Vector2)transform.InverseTransformPoint(target.transform.position) - origin;
                 float distance = offset.magnitude;
                 float dot = distance > 0f ? Vector2.Dot(offset / distance, forward) : 0f;
                 if (dot < minDot)
