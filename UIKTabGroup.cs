@@ -20,6 +20,7 @@ namespace UIKit
         [SerializeField] protected UIKWidgetSwitcher pageSwitcher;
         [SerializeField] protected UIKInputDirection pagesDirectionFromTabs = UIKInputDirection.Down;
         [SerializeField] protected bool tabSwitchingWraps = true;
+        [SerializeField] protected UIKElement_ScrollView tabScrollView;
         [SerializeField] protected List<UIKTab> tabs = new();
 
         public int currentTabIndex { get; private set; }
@@ -72,6 +73,19 @@ namespace UIKit
                 pageSwitcher.SetCurrentWidget(_page);
             }
             RefreshTabButtons();
+        }
+
+        public void ClearTabs()
+        {
+            foreach (UIKTab tab in tabs)
+            {
+                tabButtonGroup?.RemoveTarget(tab.button);
+                tab.page?.gameObject.SafeDestroy();
+            }
+
+            tabs.Clear();
+            currentTabIndex = 0;
+            pageSwitcher?.Refresh();
         }
 
         public int GetNumTabs()
@@ -137,6 +151,11 @@ namespace UIKit
 
         public void SelectTab(int _index)
         {
+            SelectTab(_index, true);
+        }
+
+        public void SelectTab(int _index, bool _feedback)
+        {
             if (_index < 0
                 || _index >= tabs.Count
                 || !IsTabSelectable(_index))
@@ -177,7 +196,10 @@ namespace UIKit
                 }
             }
 
-            UIKFeedback.Raise(UIKFeedbackKind.TabChanged, this);
+            if (_feedback)
+            {
+                UIKFeedback.Raise(UIKFeedbackKind.TabChanged, this);
+            }
             OnCurrentTabChanged.Invoke(currentTabIndex);
         }
 
@@ -240,6 +262,13 @@ namespace UIKit
                 && currentTabIndex < tabs.Count)
             {
                 pageSwitcher.navigation.Set(GetOppositeDirection(pagesDirectionFromTabs), tabs[currentTabIndex].button);
+            }
+
+            if (tabScrollView
+                && currentTabIndex < tabs.Count
+                && tabs[currentTabIndex].button)
+            {
+                tabScrollView.ScrollIntoView((RectTransform)tabs[currentTabIndex].button.transform);
             }
         }
 
