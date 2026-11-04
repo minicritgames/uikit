@@ -80,7 +80,8 @@ namespace UIKit
             // The device used to trigger the action
             // _context.action.activeControl.device
 
-            if (!Application.isFocused)
+            if (!Application.isFocused
+                || UIKInputBlockers.isBlocked)
             {
                 return;
             }
