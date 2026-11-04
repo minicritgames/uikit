@@ -45,6 +45,16 @@ namespace UIKit
             return GetComponentInParent<UIKCanvas>(true);
         }
 
+        public bool IsOnTopScreen()
+        {
+            UIKCanvas canvas = GetCanvas();
+            UIKScreen screen = GetComponentInParent<UIKScreen>(true);
+            return !canvas
+                || !screen
+                || !canvas.topScreen
+                || canvas.topScreen == screen;
+        }
+
         public UIKPlayer GetOwningPlayer()
         {
             if (GetCanvas() is UIKCanvas canvas)

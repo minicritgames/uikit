@@ -8,6 +8,8 @@ namespace UIKit
         [SerializeField] protected CanvasGroup canvasGroup;
         [SerializeField] protected UIKActionObjectReference actionObject;
         [SerializeField] protected UIKInputAction inputAction;
+
+        private bool canExecute;
         
 
         protected override void OnPreConstruct(bool _isOnValidate)
@@ -20,6 +22,8 @@ namespace UIKit
                 {
                     screen.RegisterActionTrigger(this);
                 }
+
+                GetCanvas()?.OnTopScreenChanged.AddListener(Canvas_OnTopScreenChanged);
                 
                 if (GetOwningPlayer() is UIKPlayer player)
                 {
@@ -47,6 +51,8 @@ namespace UIKit
             {
                 screen.UnregisterActionTrigger(this);
             }
+
+            GetCanvas()?.OnTopScreenChanged.RemoveListener(Canvas_OnTopScreenChanged);
         }
         
         
@@ -68,10 +74,21 @@ namespace UIKit
         
         protected virtual void UpdateCanInteract(bool _canExecute)
         {
+            canExecute = _canExecute;
+            RefreshCanInteract();
+        }
+
+        private void RefreshCanInteract()
+        {
             if (canvasGroup != null)
             {
-                canvasGroup.alpha = _canExecute ? 1f : 0.5f;
+                canvasGroup.alpha = canExecute && IsOnTopScreen() ? 1f : 0.5f;
             }
+        }
+
+        private void Canvas_OnTopScreenChanged(UIKScreen _topScreen)
+        {
+            RefreshCanInteract();
         }
 
         private void Player_OnInputActionMapChanged(string _actionMap)
