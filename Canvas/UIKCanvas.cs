@@ -42,6 +42,8 @@ namespace UIKit
         protected Dictionary<int, UIKScreenStack> screenStackByLayer = new();
 
         public UIKScreen topScreen { get; private set; }
+        public UIK2DButtonTextField editingTextField { get; private set; }
+        protected virtual string textEntryScreenName => null;
         private List<InputControl> consumedInputControlsThisFrame = new();
         private UIKInputDirection? heldMoveDirection;
         private float nextMoveRepeatTime;
@@ -291,6 +293,38 @@ namespace UIKit
             }
         }
 
+        public virtual bool OpenTextEntry(UIK2DButtonTextField _field)
+        {
+            if (string.IsNullOrEmpty(textEntryScreenName)
+                || PushScreen(textEntryScreenName) is not UIKScreen screen
+                || screen.GetComponentInChildren<UIKTextEntryKeyboard>(true) is not UIKTextEntryKeyboard keyboard)
+            {
+                return false;
+            }
+
+            keyboard.Open(_field);
+            return true;
+        }
+
+        public void SetEditingTextField(UIK2DButtonTextField _field)
+        {
+            if (editingTextField
+                && editingTextField != _field)
+            {
+                editingTextField.EndEditing(true);
+            }
+
+            editingTextField = _field;
+        }
+
+        public void ClearEditingTextField(UIK2DButtonTextField _field)
+        {
+            if (editingTextField == _field)
+            {
+                editingTextField = null;
+            }
+        }
+
         protected virtual void OnPostScreenPushed(UIKScreen _screen)
         {
         }
@@ -373,7 +407,13 @@ namespace UIKit
             {
                 return true;
             }
-            
+
+            if (editingTextField
+                && HandleTextFieldEditingInput(_context))
+            {
+                return true;
+            }
+
             // Consume UI inputs before broadcasting them
             if ((leftClickInputAction == _context.action || uiSubmitInputAction == _context.action)
                 && _context.action.WasPressedThisFrame()
@@ -408,6 +448,34 @@ namespace UIKit
                         return true;
                     }
                 }
+            }
+
+            return false;
+        }
+
+        // Typing owns the keyboard, so no key reaches an action; a click elsewhere commits the edit before it lands
+        protected virtual bool HandleTextFieldEditingInput(InputAction.CallbackContext _context)
+        {
+            InputDevice device;
+            try
+            {
+                device = _context.control?.device;
+            }
+            catch (IndexOutOfRangeException)
+            {
+                device = null;
+            }
+
+            if (device is Keyboard)
+            {
+                return true;
+            }
+
+            if (leftClickInputAction == _context.action
+                && _context.action.WasPressedThisFrame()
+                && !editingTextField.IsPointerOver())
+            {
+                editingTextField.EndEditing(true);
             }
 
             return false;

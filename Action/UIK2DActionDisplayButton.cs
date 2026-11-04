@@ -27,6 +27,8 @@ namespace UIKit
                     screen.RegisterActionTrigger(this);
                 }
 
+                GetCanvas()?.OnTopScreenChanged.AddListener(Canvas_OnTopScreenChanged);
+
                 if (GetOwningPlayer() is UIKPlayer player)
                 {
                     player.OnInputActionMapChanged.AddListener(Player_OnInputActionMapChanged);
@@ -55,6 +57,8 @@ namespace UIKit
             {
                 screen.UnregisterActionTrigger(this);
             }
+
+            GetCanvas()?.OnTopScreenChanged.RemoveListener(Canvas_OnTopScreenChanged);
         }
 
 
@@ -77,11 +81,6 @@ namespace UIKit
         protected virtual void UpdateCanInteract(bool _canExecute)
         {
             canExecute = _canExecute;
-            
-            if (canvasGroup != null)
-            {
-                canvasGroup.alpha = canExecute ? 1f : 0.5f;
-            }
 
             RefreshClickable();
         }
@@ -97,16 +96,24 @@ namespace UIKit
 
         private void RefreshClickable()
         {
+            bool active = canExecute
+                && IsOnTopScreen();
             if (canvasGroup != null)
             {
-                canvasGroup.interactable = canExecute && canClick;
-                canvasGroup.blocksRaycasts = canExecute && canClick;
+                canvasGroup.alpha = active ? 1f : 0.5f;
+                canvasGroup.interactable = active && canClick;
+                canvasGroup.blocksRaycasts = active && canClick;
             }
 
             if (!clickInputTargetsButton)
             {
-                SetInteractable(canExecute && canClick);
+                SetInteractable(active && canClick);
             }
+        }
+
+        private void Canvas_OnTopScreenChanged(UIKScreen _topScreen)
+        {
+            RefreshClickable();
         }
 
         private void Player_OnInputActionMapChanged(string _actionMap)
