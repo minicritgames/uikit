@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
@@ -20,6 +21,8 @@ namespace UIKit
         [SerializeField] protected float defaultValue;
 
         public float value { get; private set; }
+
+        private readonly List<string> valueLabels = new();
 
 
         protected override void OnPreConstruct(bool _isOnValidate)
@@ -90,6 +93,16 @@ namespace UIKit
         public void SetValueFormat(string _valueFormat)
         {
             valueFormat = _valueFormat;
+            RefreshVisuals();
+        }
+
+        public void SetValueLabels(List<string> _labels)
+        {
+            valueLabels.Clear();
+            if (_labels != null)
+            {
+                valueLabels.AddRange(_labels);
+            }
             RefreshVisuals();
         }
 
@@ -168,7 +181,8 @@ namespace UIKit
 
             if (valueText)
             {
-                valueText.SetText(value.ToString(valueFormat));
+                int labelIndex = Mathf.RoundToInt(value - minValue);
+                valueText.SetText(labelIndex >= 0 && labelIndex < valueLabels.Count ? valueLabels[labelIndex] : value.ToString(valueFormat));
             }
         }
     }
