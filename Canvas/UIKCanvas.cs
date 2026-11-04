@@ -265,6 +265,19 @@ namespace UIKit
             }
         }
 
+        public void PopScreen(UIKScreen _screen)
+        {
+            if (_screen
+                && _screen.GetType().GetCustomAttribute<UIKScreenAttribute>() is UIKScreenAttribute screenAttribute
+                && GetScreenStack(screenAttribute.layer) is UIKScreenStack screenStack
+                && screenStack.GetWidgetsOrdered().Contains(_screen))
+            {
+                OnPreScreenPopped(_screen);
+                screenStack.PopFromStack(_screen);
+                OnPostScreenPopped();
+            }
+        }
+
         public void PopAllScreens()
         {
             foreach (UIKScreenStack screenStack in GetScreenStacksOrdered().ToArray())

@@ -78,10 +78,7 @@ namespace UIKit
         {
             if (GetCanvas())
             {
-                if (GetType().GetCustomAttribute<UIKScreenAttribute>() is UIKScreenAttribute attribute)
-                {
-                    GetCanvas().PopScreen(attribute.name);
-                }
+                GetCanvas().PopScreen(this);
             }
         }
 

@@ -85,7 +85,7 @@ namespace UIKit
 
         public List<UIKWidget> GetWidgetsOrdered()
         {
-            List<UIKWidget> reversedWidgets = widgetsInStack;
+            List<UIKWidget> reversedWidgets = new(widgetsInStack);
             reversedWidgets.Reverse();
             return reversedWidgets;
         }
