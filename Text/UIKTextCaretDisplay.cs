@@ -91,20 +91,59 @@ namespace UIKit
             }
 
             text.ForceMeshUpdate();
-            if (text.textInfo.characterCount == 0)
+            TMP_TextInfo textInfo = text.textInfo;
+            if (textInfo.characterCount == 0
+                || textInfo.lineCount == 0)
             {
                 return 0;
             }
 
             Canvas canvas = text.canvas ? text.canvas.rootCanvas : null;
             Camera camera = canvas && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
-            int index = TMP_TextUtilities.GetCursorIndexFromPosition(text, _screenPosition, camera, out CaretPosition position);
-            if (index < 0)
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(text.rectTransform, _screenPosition, camera, out Vector2 point))
             {
                 return 0;
             }
 
-            return position == CaretPosition.Right ? index + 1 : index;
+            int lineNumber = GetNearestLine(point.y);
+            TMP_LineInfo line = textInfo.lineInfo[lineNumber];
+            for (int i = line.firstCharacterIndex; i <= line.lastCharacterIndex; i++)
+            {
+                TMP_CharacterInfo character = textInfo.characterInfo[i];
+                if (point.x < (character.origin + character.xAdvance) * 0.5f)
+                {
+                    return i;
+                }
+            }
+
+            // Past the end of a wrapped line, the caret goes before the space it wrapped at, so it stays on this line
+            bool lastLine = lineNumber == textInfo.lineCount - 1;
+            if (!lastLine
+                && char.IsWhiteSpace(textInfo.characterInfo[line.lastCharacterIndex].character))
+            {
+                return line.lastCharacterIndex;
+            }
+
+            return line.lastCharacterIndex + 1;
+        }
+
+        private int GetNearestLine(float _y)
+        {
+            TMP_TextInfo textInfo = text.textInfo;
+            int nearest = 0;
+            float nearestDistance = float.MaxValue;
+            for (int i = 0; i < textInfo.lineCount; i++)
+            {
+                TMP_LineInfo line = textInfo.lineInfo[i];
+                float distance = _y > line.ascender ? _y - line.ascender : _y < line.descender ? line.descender - _y : 0f;
+                if (distance < nearestDistance)
+                {
+                    nearest = i;
+                    nearestDistance = distance;
+                }
+            }
+
+            return nearest;
         }
 
         private void Refresh()
