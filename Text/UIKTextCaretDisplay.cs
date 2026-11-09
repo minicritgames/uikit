@@ -9,6 +9,7 @@ namespace UIKit
         [SerializeField] protected TMP_Text text;
         [SerializeField] protected Graphic caret;
         [SerializeField] protected float blinkInterval = 0.5f;
+        [SerializeField] protected bool followLines;
 
         private bool caretShown;
         private int caretIndex;
@@ -70,10 +71,29 @@ namespace UIKit
 
             placedTextRect = text.rectTransform.rect;
             text.ForceMeshUpdate();
-            Vector3 caretWorldPosition = text.rectTransform.TransformPoint(new Vector3(GetCaretX(), 0f, 0f));
+            Vector3 caretWorldPosition = text.rectTransform.TransformPoint(new Vector3(GetCaretX(), followLines ? GetCaretLineCenterY() : 0f, 0f));
             Vector3 caretPosition = caret.rectTransform.localPosition;
-            caretPosition.x = caret.rectTransform.parent.InverseTransformPoint(caretWorldPosition).x;
+            Vector3 caretParentPosition = caret.rectTransform.parent.InverseTransformPoint(caretWorldPosition);
+            caretPosition.x = caretParentPosition.x;
+            if (followLines)
+            {
+                caretPosition.y = caretParentPosition.y;
+            }
             caret.rectTransform.localPosition = caretPosition;
+        }
+
+        private float GetCaretLineCenterY()
+        {
+            TMP_TextInfo textInfo = text.textInfo;
+            int count = Mathf.Min(caretIndex, textInfo.characterCount);
+            if (textInfo.lineCount == 0)
+            {
+                return text.rectTransform.rect.center.y;
+            }
+
+            int lineNumber = count > 0 ? textInfo.characterInfo[count - 1].lineNumber : 0;
+            TMP_LineInfo line = textInfo.lineInfo[lineNumber];
+            return (line.ascender + line.descender) * 0.5f;
         }
 
         // In the text's local space
