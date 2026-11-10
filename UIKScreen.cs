@@ -37,14 +37,38 @@ namespace UIKit
         [SerializeField] public UIKScreenLowerScreenVisibility lowerScreenVisibility;
         [SerializeField] public UIKInputAction backInputAction;
         [SerializeField] public UIKElement firstTarget;
-        
+        [SerializeField] public List<string> transitionCategories = new();
+
         protected Dictionary<UIKInputAction, List<UIKButton>> buttonByAction = new();
         protected Dictionary<UIKInputAction, List<UIKActionTrigger>> triggerByAction = new();
+
+        public bool isClosing { get; private set; }
+        public bool isMoving => motionPlayer.isPlaying;
+        public bool isMotionWaiting => motionPlayer.isWaiting;
+        public bool isVisible => GetCanvasGroup() is CanvasGroup canvasGroup
+            && canvasGroup.alpha > 0f;
+
+        private readonly UIKScreenMotionPlayer motionPlayer = new();
+        private bool stackHidden;
+        private bool awaitingTransition;
+        private Vector2 restAnchoredPosition;
+        private Vector3 restLocalScale = Vector3.one;
+        private Quaternion restLocalRotation = Quaternion.identity;
+        private bool restCaptured;
 
 
         protected override void OnPreConstruct(bool _isOnValidate)
         {
             base.OnPreConstruct(_isOnValidate);
+
+            if (!_isOnValidate
+                && transform is RectTransform rectTransform)
+            {
+                restAnchoredPosition = rectTransform.anchoredPosition;
+                restLocalScale = rectTransform.localScale;
+                restLocalRotation = rectTransform.localRotation;
+                restCaptured = true;
+            }
 
             if (firstTarget == this)
             {
@@ -141,6 +165,97 @@ namespace UIKit
         public CanvasGroup GetCanvasGroup()
         {
             return GetComponent<CanvasGroup>();
+        }
+
+        public void MarkClosing()
+        {
+            isClosing = true;
+            Deactivate();
+            if (GetCanvasGroup() is CanvasGroup canvasGroup)
+            {
+                canvasGroup.interactable = false;
+                canvasGroup.blocksRaycasts = false;
+            }
+        }
+
+        public void SetStackHidden(bool _hidden)
+        {
+            stackHidden = _hidden;
+            ApplyPose();
+        }
+
+        // Kept invisible from the push until the canvas picks its transition, so it never shows a frame early
+        public void SetAwaitingTransition()
+        {
+            awaitingTransition = true;
+            ApplyPose();
+        }
+
+        public void PlayOutgoingMotion(UIKScreenMotion _motion)
+        {
+            awaitingTransition = false;
+            motionPlayer.PlayTowardAway(_motion);
+            ApplyPose();
+        }
+
+        public void PlayIncomingMotion(UIKScreenMotion _motion, float _startDelay, bool _fromAway)
+        {
+            awaitingTransition = false;
+            motionPlayer.PlayTowardRest(_motion, _startDelay, _fromAway);
+            ApplyPose();
+        }
+
+        public void SetRestPose()
+        {
+            awaitingTransition = false;
+            motionPlayer.SetRest();
+            ApplyPose();
+        }
+
+        public void SnapMotion()
+        {
+            motionPlayer.SnapToEnd();
+            ApplyPose();
+        }
+
+        public void SkipMotionDelay()
+        {
+            motionPlayer.SkipDelay();
+        }
+
+        public bool TickMotion(float _deltaTime)
+        {
+            bool finished = motionPlayer.Tick(_deltaTime);
+            ApplyPose();
+            return finished;
+        }
+
+        // Offsets are in parent sizes, so a resize moves a screen that's away to stay away
+        protected virtual void OnRectTransformDimensionsChange()
+        {
+            if (restCaptured)
+            {
+                ApplyPose();
+            }
+        }
+
+        private void ApplyPose()
+        {
+            UIKScreenPose pose = motionPlayer.pose;
+            if (GetCanvasGroup() is CanvasGroup canvasGroup)
+            {
+                bool hidden = awaitingTransition
+                    || (stackHidden && !motionPlayer.isPlaying);
+                canvasGroup.alpha = hidden ? 0f : pose.alpha;
+            }
+
+            if (transform is RectTransform rectTransform)
+            {
+                Vector2 parentSize = transform.parent is RectTransform parentRectTransform ? parentRectTransform.rect.size : Vector2.zero;
+                rectTransform.anchoredPosition = restAnchoredPosition + new Vector2(pose.offsetX * parentSize.x, pose.offsetY * parentSize.y);
+                rectTransform.localScale = restLocalScale * pose.scale;
+                rectTransform.localRotation = restLocalRotation * Quaternion.Euler(0f, 0f, pose.rotation);
+            }
         }
         
         public bool HandleInputAction(InputAction.CallbackContext _context)
