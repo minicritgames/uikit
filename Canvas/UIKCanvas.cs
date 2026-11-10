@@ -176,12 +176,24 @@ namespace UIKit
                 return;
             }
 
-            float deltaTime = Time.unscaledDeltaTime * UIKScreenTransitions.timeScale;
+            float deltaTime = UIKScreenTransitions.GetDeltaTime();
             foreach (UIKScreen screen in movingScreens.ToArray())
             {
                 if (!screen)
                 {
                     movingScreens.Remove(screen);
+                    continue;
+                }
+
+                // While something covers every screen, intros wait to play when it lifts and anything leaving goes unseen at once
+                if (UIKScreenTransitions.motionsHeld)
+                {
+                    if (!screen.isEntering)
+                    {
+                        screen.SnapMotion();
+                        FinishMotion(screen);
+                    }
+
                     continue;
                 }
 

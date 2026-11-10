@@ -1,64 +1,15 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 
 namespace UIKit
 {
-    public class UIKLoadingScreen : MonoBehaviour
+    public class UIKLoadingScreen : UIKCurtain
     {
-        [SerializeField] private CanvasGroup canvasGroup;
         [SerializeField] private TMP_Text statusText;
-        [SerializeField] private float fadeOutSeconds = 0.25f;
-        [SerializeField] private bool blocksInput = true;
+        // Shown only while something loads, so a plain cover is just the curtain
+        [SerializeField] private List<GameObject> loadingContent = new();
 
-        public bool isShowing { get; private set; }
-
-        private float fadeOutElapsed;
-
-
-        protected virtual void Awake()
-        {
-            if (!isShowing)
-            {
-                gameObject.SetActive(false);
-            }
-        }
-
-        protected virtual void Update()
-        {
-            if (isShowing
-                || !canvasGroup)
-            {
-                return;
-            }
-
-            fadeOutElapsed += Time.unscaledDeltaTime;
-            canvasGroup.alpha = fadeOutSeconds > 0f ? 1f - Mathf.Clamp01(fadeOutElapsed / fadeOutSeconds) : 0f;
-            if (canvasGroup.alpha <= 0f)
-            {
-                gameObject.SetActive(false);
-            }
-        }
-
-        protected virtual void OnDisable()
-        {
-            UIKInputBlockers.Remove(this);
-        }
-
-        public void Show(string _status = null)
-        {
-            isShowing = true;
-            gameObject.SetActive(true);
-            if (canvasGroup)
-            {
-                canvasGroup.alpha = 1f;
-            }
-            SetStatus(_status);
-
-            if (blocksInput)
-            {
-                UIKInputBlockers.Add(this);
-            }
-        }
 
         public void SetStatus(string _status)
         {
@@ -68,20 +19,14 @@ namespace UIKit
             }
         }
 
-        public void Hide()
+        public void SetLoadingContentShown(bool _shown)
         {
-            if (!isShowing)
+            foreach (GameObject content in loadingContent)
             {
-                return;
-            }
-
-            isShowing = false;
-            fadeOutElapsed = 0f;
-            UIKInputBlockers.Remove(this);
-            if (!canvasGroup
-                || fadeOutSeconds <= 0f)
-            {
-                gameObject.SetActive(false);
+                if (content)
+                {
+                    content.SetActive(_shown);
+                }
             }
         }
     }

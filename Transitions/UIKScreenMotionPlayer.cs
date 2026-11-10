@@ -27,16 +27,16 @@ namespace UIKit
         public bool isWaiting => isPlaying && elapsed < startDelay;
         public IReadOnlyList<UIKScreenMotionBody> posedBodies => __posedBodies;
 
-        private readonly UIKScreen screen;
+        private readonly UIKScreenMotionBodySource source;
         private readonly List<TrackPlayback> playbacks = new();
         private readonly List<UIKScreenMotionBody> __posedBodies = new();
         private float elapsed;
         private float startDelay;
 
 
-        public UIKScreenMotionPlayer(UIKScreen _screen)
+        public UIKScreenMotionPlayer(UIKScreenMotionBodySource _source)
         {
-            screen = _screen;
+            source = _source;
         }
 
 
@@ -55,7 +55,7 @@ namespace UIKit
             startDelay = 0f;
             foreach (UIKScreenMotionTrack track in _motion.tracks)
             {
-                IReadOnlyList<UIKScreenMotionBody> bodies = screen.GetMotionBodies(track.group);
+                IReadOnlyList<UIKScreenMotionBody> bodies = source.GetMotionBodies(track.group);
                 float restValue = UIKScreenPose.GetRestValue(track.property);
                 for (int i = 0; i < bodies.Count; i++)
                 {
@@ -73,7 +73,7 @@ namespace UIKit
             List<StartValue> startValues = new();
             foreach (UIKScreenMotionTrack track in _motion.tracks)
             {
-                foreach (UIKScreenMotionBody body in screen.GetMotionBodies(track.group))
+                foreach (UIKScreenMotionBody body in source.GetMotionBodies(track.group))
                 {
                     startValues.Add(new StartValue
                     {
@@ -84,7 +84,7 @@ namespace UIKit
                 }
             }
 
-            foreach (UIKScreenMotionBody body in screen.GetAllMotionBodies())
+            foreach (UIKScreenMotionBody body in source.GetAllMotionBodies())
             {
                 body.pose = UIKScreenPose.rest;
                 TrackPosed(body);
@@ -99,7 +99,7 @@ namespace UIKit
             startDelay = _startDelay;
             foreach (UIKScreenMotionTrack track in _motion.tracks)
             {
-                IReadOnlyList<UIKScreenMotionBody> bodies = screen.GetMotionBodies(track.group);
+                IReadOnlyList<UIKScreenMotionBody> bodies = source.GetMotionBodies(track.group);
                 float restValue = UIKScreenPose.GetRestValue(track.property);
                 for (int i = 0; i < bodies.Count; i++)
                 {

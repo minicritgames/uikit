@@ -31,7 +31,7 @@ namespace UIKit
     }
     
     [RequireComponent(typeof(CanvasGroup))]
-    public abstract class UIKScreen : UIKWidget, UIKInputActionHandler
+    public abstract class UIKScreen : UIKWidget, UIKInputActionHandler, UIKScreenMotionBodySource
     {
         [SerializeField] public UIKScreenInputType inputType;
         [SerializeField] public UIKScreenLowerScreenVisibility lowerScreenVisibility;
@@ -45,6 +45,7 @@ namespace UIKit
         public bool isClosing { get; private set; }
         public bool isMoving => motionPlayer.isPlaying;
         public bool isMotionWaiting => motionPlayer.isWaiting;
+        public bool isEntering { get; private set; }
         public bool isVisible => GetCanvasGroup() is CanvasGroup canvasGroup
             && canvasGroup.alpha > 0f;
 
@@ -185,6 +186,7 @@ namespace UIKit
         public void PlayOutgoingMotion(UIKScreenMotion _motion)
         {
             awaitingTransition = false;
+            isEntering = false;
             motionPlayer.PlayTowardAway(_motion, isClosing);
             ApplyPose();
         }
@@ -192,6 +194,7 @@ namespace UIKit
         public void PlayIncomingMotion(UIKScreenMotion _motion, float _startDelay, bool _fromAway)
         {
             awaitingTransition = false;
+            isEntering = true;
             motionPlayer.PlayTowardRest(_motion, _startDelay, _fromAway);
             ApplyPose();
         }
@@ -199,12 +202,14 @@ namespace UIKit
         public void SetRestPose()
         {
             awaitingTransition = false;
+            isEntering = false;
             motionPlayer.SetRest();
             ApplyPose();
         }
 
         public void SnapMotion()
         {
+            isEntering = false;
             motionPlayer.SnapToEnd();
             ApplyPose();
         }
@@ -217,6 +222,11 @@ namespace UIKit
         public bool TickMotion(float _deltaTime)
         {
             bool finished = motionPlayer.Tick(_deltaTime);
+            if (finished)
+            {
+                isEntering = false;
+            }
+
             ApplyPose();
             return finished;
         }
@@ -244,53 +254,12 @@ namespace UIKit
 
         public IReadOnlyList<UIKScreenMotionBody> GetMotionBodies(string _group)
         {
-            List<UIKScreenMotionBody> bodies = new();
-            if (string.IsNullOrEmpty(_group))
-            {
-                bodies.Add(rootBody);
-                return bodies;
-            }
-
-            foreach (UIKScreenMotionElement element in GetOwnMotionElements())
-            {
-                if (element.group == _group
-                    && element.isActiveAndEnabled)
-                {
-                    bodies.Add(element.body);
-                }
-            }
-
-            return bodies;
+            return UIKScreenMotionElement.CollectBodies(this, rootBody, _group);
         }
 
         public IReadOnlyList<UIKScreenMotionBody> GetAllMotionBodies()
         {
-            List<UIKScreenMotionBody> bodies = new()
-            {
-                rootBody
-            };
-            foreach (UIKScreenMotionElement element in GetOwnMotionElements())
-            {
-                bodies.Add(element.body);
-            }
-
-            return bodies;
-        }
-
-        // Elements inside a nested screen belong to it, and one on this screen's own transform would fight the screen's pose
-        private List<UIKScreenMotionElement> GetOwnMotionElements()
-        {
-            List<UIKScreenMotionElement> elements = new();
-            foreach (UIKScreenMotionElement element in GetComponentsInChildren<UIKScreenMotionElement>(true))
-            {
-                if (element.transform != transform
-                    && element.GetComponentInParent<UIKScreen>(true) == this)
-                {
-                    elements.Add(element);
-                }
-            }
-
-            return elements;
+            return UIKScreenMotionElement.CollectAllBodies(this, rootBody);
         }
         
         public bool HandleInputAction(InputAction.CallbackContext _context)
