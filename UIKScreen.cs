@@ -48,27 +48,18 @@ namespace UIKit
         public bool isVisible => GetCanvasGroup() is CanvasGroup canvasGroup
             && canvasGroup.alpha > 0f;
 
-        private readonly UIKScreenMotionPlayer motionPlayer = new();
+        private UIKScreenMotionPlayer motionPlayer => __motionPlayer ??= new UIKScreenMotionPlayer(this);
+        private UIKScreenMotionBody rootBody => __rootBody ??= new UIKScreenMotionBody((RectTransform)transform, GetCanvasGroup());
+
+        private UIKScreenMotionPlayer __motionPlayer;
+        private UIKScreenMotionBody __rootBody;
         private bool stackHidden;
         private bool awaitingTransition;
-        private Vector2 restAnchoredPosition;
-        private Vector3 restLocalScale = Vector3.one;
-        private Quaternion restLocalRotation = Quaternion.identity;
-        private bool restCaptured;
 
 
         protected override void OnPreConstruct(bool _isOnValidate)
         {
             base.OnPreConstruct(_isOnValidate);
-
-            if (!_isOnValidate
-                && transform is RectTransform rectTransform)
-            {
-                restAnchoredPosition = rectTransform.anchoredPosition;
-                restLocalScale = rectTransform.localScale;
-                restLocalRotation = rectTransform.localRotation;
-                restCaptured = true;
-            }
 
             if (firstTarget == this)
             {
@@ -194,7 +185,7 @@ namespace UIKit
         public void PlayOutgoingMotion(UIKScreenMotion _motion)
         {
             awaitingTransition = false;
-            motionPlayer.PlayTowardAway(_motion);
+            motionPlayer.PlayTowardAway(_motion, isClosing);
             ApplyPose();
         }
 
@@ -233,29 +224,73 @@ namespace UIKit
         // Offsets are in parent sizes, so a resize moves a screen that's away to stay away
         protected virtual void OnRectTransformDimensionsChange()
         {
-            if (restCaptured)
+            ApplyPose();
+        }
+
+        public void ApplyPose()
+        {
+            bool hidden = awaitingTransition
+                || (stackHidden && !motionPlayer.isPlaying);
+            rootBody.Apply(hidden);
+            IReadOnlyList<UIKScreenMotionBody> posedBodies = motionPlayer.posedBodies;
+            for (int i = 0; i < posedBodies.Count; i++)
             {
-                ApplyPose();
+                if (posedBodies[i] != rootBody)
+                {
+                    posedBodies[i].Apply(false);
+                }
             }
         }
 
-        private void ApplyPose()
+        public IReadOnlyList<UIKScreenMotionBody> GetMotionBodies(string _group)
         {
-            UIKScreenPose pose = motionPlayer.pose;
-            if (GetCanvasGroup() is CanvasGroup canvasGroup)
+            List<UIKScreenMotionBody> bodies = new();
+            if (string.IsNullOrEmpty(_group))
             {
-                bool hidden = awaitingTransition
-                    || (stackHidden && !motionPlayer.isPlaying);
-                canvasGroup.alpha = hidden ? 0f : pose.alpha;
+                bodies.Add(rootBody);
+                return bodies;
             }
 
-            if (transform is RectTransform rectTransform)
+            foreach (UIKScreenMotionElement element in GetOwnMotionElements())
             {
-                Vector2 parentSize = transform.parent is RectTransform parentRectTransform ? parentRectTransform.rect.size : Vector2.zero;
-                rectTransform.anchoredPosition = restAnchoredPosition + new Vector2(pose.offsetX * parentSize.x, pose.offsetY * parentSize.y);
-                rectTransform.localScale = restLocalScale * pose.scale;
-                rectTransform.localRotation = restLocalRotation * Quaternion.Euler(0f, 0f, pose.rotation);
+                if (element.group == _group
+                    && element.isActiveAndEnabled)
+                {
+                    bodies.Add(element.body);
+                }
             }
+
+            return bodies;
+        }
+
+        public IReadOnlyList<UIKScreenMotionBody> GetAllMotionBodies()
+        {
+            List<UIKScreenMotionBody> bodies = new()
+            {
+                rootBody
+            };
+            foreach (UIKScreenMotionElement element in GetOwnMotionElements())
+            {
+                bodies.Add(element.body);
+            }
+
+            return bodies;
+        }
+
+        // Elements inside a nested screen belong to it, and one on this screen's own transform would fight the screen's pose
+        private List<UIKScreenMotionElement> GetOwnMotionElements()
+        {
+            List<UIKScreenMotionElement> elements = new();
+            foreach (UIKScreenMotionElement element in GetComponentsInChildren<UIKScreenMotionElement>(true))
+            {
+                if (element.transform != transform
+                    && element.GetComponentInParent<UIKScreen>(true) == this)
+                {
+                    elements.Add(element);
+                }
+            }
+
+            return elements;
         }
         
         public bool HandleInputAction(InputAction.CallbackContext _context)

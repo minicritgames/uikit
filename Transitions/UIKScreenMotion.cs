@@ -22,6 +22,9 @@ namespace UIKit
         public float duration = 0.2f;
         public float delay;
         public UIKEase ease = UIKEase.CubicOut;
+        // Empty moves the screen itself; otherwise every motion element of that group, each one stagger seconds after the last
+        public string group;
+        public float stagger;
     }
 
     [Serializable]

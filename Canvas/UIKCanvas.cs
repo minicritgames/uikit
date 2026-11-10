@@ -94,6 +94,18 @@ namespace UIKit
             consumedInputControlsThisFrame.Clear();
         }
 
+        protected virtual void OnEnable()
+        {
+            // Creating the registry first subscribes its layout pass ahead of ours
+            _ = UnityEngine.UI.CanvasUpdateRegistry.instance;
+            Canvas.willRenderCanvases += Canvas_WillRenderCanvases;
+        }
+
+        protected virtual void OnDisable()
+        {
+            Canvas.willRenderCanvases -= Canvas_WillRenderCanvases;
+        }
+
         protected virtual void LateUpdate()
         {
             TickScreenMotions();
@@ -108,6 +120,18 @@ namespace UIKit
             }
         }
 
+
+        // Runs after the layout pass, so poses land on top of whatever layout just placed
+        private void Canvas_WillRenderCanvases()
+        {
+            foreach (UIKScreen screen in movingScreens)
+            {
+                if (screen)
+                {
+                    screen.ApplyPose();
+                }
+            }
+        }
 
         private void ScreenStack_OnStackChanged()
         {
