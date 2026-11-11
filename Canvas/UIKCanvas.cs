@@ -368,7 +368,7 @@ namespace UIKit
         private IEnumerator DoCheckTopScreenChanged()
         {
             // Wait a frame for deleted screens and child index changes to propagate
-            yield return new WaitForEndOfFrame();
+            yield return WaitForFrameEnd();
             
             UIKScreen lastTopScreen = topScreen;
             UIKScreen newTopScreen = GetTopScreen();
@@ -400,12 +400,18 @@ namespace UIKit
                     {
                         // Wait a frame for press input to be finish
                         // Switching our current action map will re-broadcast any inputs from this frame
-                        yield return new WaitForEndOfFrame();
+                        yield return WaitForFrameEnd();
                     
                         player.SetInputActionMap(actionMapName);
                     }
                 }  
             }
+        }
+
+        // End of frame never comes in batch mode, so headless runs wait for the next frame instead
+        private static object WaitForFrameEnd()
+        {
+            return Application.isBatchMode ? null : new WaitForEndOfFrame();
         }
 
         protected virtual void HandleTopScreenChanged()
