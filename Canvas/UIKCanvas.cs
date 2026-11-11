@@ -37,6 +37,7 @@ namespace UIKit
         [SerializeField] protected float moveRepeatInterval = 0.1f;
         [SerializeField] public List<UIKScreenInputTypeActionMap> screenInputTypeActionMaps = new();
         [SerializeField] public List<UIKInputDeviceInputIconDatabase> inputDeviceInputIconDatabases = new();
+        [SerializeField] public UIKScreenTransitionRules transitionRules;
         
         protected Transform screenStackPanelTransform;
         protected Dictionary<int, UIKScreenStack> screenStackByLayer = new();
@@ -47,8 +48,17 @@ namespace UIKit
         private List<InputControl> consumedInputControlsThisFrame = new();
         private UIKInputDirection? heldMoveDirection;
         private float nextMoveRepeatTime;
-        
-        
+        private bool transitionPending;
+        private UIKScreenTransition transitionOverride;
+        // The top screen as last shown, which a transition starts from
+        private UIKScreen shownTopScreen;
+        private readonly List<UIKScreen> openedScreens = new();
+        private readonly List<UIKScreen> closedScreens = new();
+        private readonly List<UIKScreen> movingScreens = new();
+        private readonly List<UIKScreen> lastOutgoingScreens = new();
+        private UIKScreen lastIncomingScreen;
+
+
         protected virtual void Awake()
         {
             DontDestroyOnLoad(gameObject);
@@ -84,10 +94,260 @@ namespace UIKit
             consumedInputControlsThisFrame.Clear();
         }
 
+        protected virtual void OnEnable()
+        {
+            // Creating the registry first subscribes its layout pass ahead of ours
+            _ = UnityEngine.UI.CanvasUpdateRegistry.instance;
+            Canvas.willRenderCanvases += Canvas_WillRenderCanvases;
+        }
+
+        protected virtual void OnDisable()
+        {
+            Canvas.willRenderCanvases -= Canvas_WillRenderCanvases;
+        }
+
+        protected virtual void LateUpdate()
+        {
+            TickScreenMotions();
+
+            if (transitionPending)
+            {
+                ResolveTransition();
+            }
+            else
+            {
+                transitionOverride = null;
+            }
+        }
+
+
+        // Runs after the layout pass, so poses land on top of whatever layout just placed
+        private void Canvas_WillRenderCanvases()
+        {
+            foreach (UIKScreen screen in movingScreens)
+            {
+                if (screen)
+                {
+                    screen.ApplyPose();
+                }
+            }
+        }
 
         private void ScreenStack_OnStackChanged()
         {
+            transitionPending = true;
             RefreshTopScreen();
+        }
+
+        private void ScreenStack_OnScreenOpened(UIKScreen _screen)
+        {
+            transitionPending = true;
+            openedScreens.Add(_screen);
+            if (CanTransition())
+            {
+                _screen.SetAwaitingTransition();
+            }
+        }
+
+        // Without anything to animate a closed screen goes at once, exactly as if transitions didn't exist
+        private void ScreenStack_OnScreenClosed(UIKScreen _screen)
+        {
+            transitionPending = true;
+            if (CanTransition())
+            {
+                closedScreens.Add(_screen);
+            }
+            else
+            {
+                _screen.gameObject.SafeDestroy();
+            }
+        }
+
+        private bool CanTransition()
+        {
+            return !UIKScreenTransitions.instant
+                && (transitionRules || transitionOverride);
+        }
+
+        private void TickScreenMotions()
+        {
+            if (movingScreens.Count == 0)
+            {
+                return;
+            }
+
+            float deltaTime = UIKScreenTransitions.GetDeltaTime();
+            foreach (UIKScreen screen in movingScreens.ToArray())
+            {
+                if (!screen)
+                {
+                    movingScreens.Remove(screen);
+                    continue;
+                }
+
+                // While something covers every screen, intros wait to play when it lifts and anything leaving goes unseen at once
+                if (UIKScreenTransitions.motionsHeld)
+                {
+                    if (!screen.isEntering)
+                    {
+                        screen.SnapMotion();
+                        FinishMotion(screen);
+                    }
+
+                    continue;
+                }
+
+                if (screen.TickMotion(deltaTime))
+                {
+                    FinishMotion(screen);
+                }
+            }
+        }
+
+        private void FinishMotion(UIKScreen _screen)
+        {
+            movingScreens.Remove(_screen);
+            if (_screen.isClosing)
+            {
+                _screen.gameObject.SafeDestroy();
+            }
+        }
+
+        private void ResolveTransition()
+        {
+            transitionPending = false;
+
+            UIKScreen fromScreen = shownTopScreen ? shownTopScreen : null;
+            UIKScreen toScreen = GetTopScreen();
+            bool back = toScreen
+                && !openedScreens.Contains(toScreen);
+            bool reversed = false;
+            UIKScreenTransition transition = transitionOverride;
+            transitionOverride = null;
+            if (fromScreen == toScreen
+                || UIKScreenTransitions.instant)
+            {
+                transition = null;
+            }
+            else if (!transition
+                && transitionRules)
+            {
+                transition = transitionRules.Resolve(fromScreen, toScreen, back, out reversed);
+            }
+
+            if (fromScreen != toScreen)
+            {
+                FlushWaitingTransition();
+                lastOutgoingScreens.Clear();
+                lastIncomingScreen = null;
+            }
+
+            UIKScreenMotion outgoingMotion = transition ? (reversed ? transition.incoming : transition.outgoing) : null;
+            UIKScreenMotion incomingMotion = transition ? (reversed ? transition.outgoing : transition.incoming) : null;
+            bool outgoingMoves = outgoingMotion != null
+                && outgoingMotion.HasTracks();
+            bool incomingMoves = incomingMotion != null
+                && incomingMotion.HasTracks();
+
+            foreach (UIKScreen closedScreen in closedScreens)
+            {
+                if (!closedScreen)
+                {
+                    continue;
+                }
+
+                if (outgoingMoves
+                    && closedScreen.isVisible
+                    && !openedScreens.Contains(closedScreen))
+                {
+                    closedScreen.PlayOutgoingMotion(outgoingMotion);
+                    StartMotion(closedScreen);
+                    lastOutgoingScreens.Add(closedScreen);
+                }
+                else
+                {
+                    movingScreens.Remove(closedScreen);
+                    closedScreen.gameObject.SafeDestroy();
+                }
+            }
+
+            if (fromScreen
+                && !fromScreen.isClosing
+                && fromScreen != toScreen
+                && outgoingMoves)
+            {
+                fromScreen.PlayOutgoingMotion(outgoingMotion);
+                StartMotion(fromScreen);
+                lastOutgoingScreens.Add(fromScreen);
+            }
+
+            foreach (UIKScreen openedScreen in openedScreens)
+            {
+                if (openedScreen
+                    && !openedScreen.isClosing
+                    && openedScreen != toScreen)
+                {
+                    openedScreen.SetRestPose();
+                }
+            }
+
+            if (toScreen
+                && toScreen != fromScreen)
+            {
+                if (incomingMoves)
+                {
+                    bool fromAway = openedScreens.Contains(toScreen)
+                        || !toScreen.isVisible;
+                    toScreen.PlayIncomingMotion(incomingMotion, transition.incomingDelay, fromAway);
+                    StartMotion(toScreen);
+                    lastIncomingScreen = toScreen;
+                }
+                else
+                {
+                    movingScreens.Remove(toScreen);
+                    toScreen.SetRestPose();
+                }
+            }
+            else if (toScreen
+                && openedScreens.Contains(toScreen))
+            {
+                toScreen.SetRestPose();
+            }
+
+            shownTopScreen = toScreen;
+            openedScreens.Clear();
+            closedScreens.Clear();
+        }
+
+        // A sequence cut short by the next change skips its pause: what was leaving is gone and what was waiting starts now
+        private void FlushWaitingTransition()
+        {
+            if (!lastIncomingScreen
+                || !lastIncomingScreen.isMotionWaiting)
+            {
+                return;
+            }
+
+            foreach (UIKScreen outgoingScreen in lastOutgoingScreens)
+            {
+                if (!outgoingScreen)
+                {
+                    continue;
+                }
+
+                outgoingScreen.SnapMotion();
+                FinishMotion(outgoingScreen);
+            }
+
+            lastIncomingScreen.SkipMotionDelay();
+        }
+
+        private void StartMotion(UIKScreen _screen)
+        {
+            if (!movingScreens.Contains(_screen))
+            {
+                movingScreens.Add(_screen);
+            }
         }
         
         public string GetActionMapForScreenInputType(UIKScreenInputType _inputType)
@@ -238,8 +498,9 @@ namespace UIKit
             return null;
         }
         
-        public UIKScreen PushScreen(string _name)
+        public UIKScreen PushScreen(string _name, UIKScreenTransition _transition = null)
         {
+            SetTransitionOverride(_transition);
             if (UIKScreen.GetScreenPrefab(_name) is GameObject screenPrefab
                 && screenPrefab.GetComponent<UIKScreen>() is UIKScreen screen
                 && screen.GetType().GetCustomAttribute<UIKScreenAttribute>() is UIKScreenAttribute screenAttribute
@@ -254,8 +515,9 @@ namespace UIKit
             return null;
         }
 
-        public void PopScreen(string _name)
+        public void PopScreen(string _name, UIKScreenTransition _transition = null)
         {
+            SetTransitionOverride(_transition);
             foreach (UIKScreenStack screenStack in GetScreenStacksOrdered())
             {
                 foreach (UIKWidget screenWidget in screenStack.GetWidgetsOrdered())
@@ -273,8 +535,9 @@ namespace UIKit
             }
         }
 
-        public void PopScreen(UIKScreen _screen)
+        public void PopScreen(UIKScreen _screen, UIKScreenTransition _transition = null)
         {
+            SetTransitionOverride(_transition);
             if (_screen
                 && _screen.GetType().GetCustomAttribute<UIKScreenAttribute>() is UIKScreenAttribute screenAttribute
                 && GetScreenStack(screenAttribute.layer) is UIKScreenStack screenStack
@@ -286,8 +549,9 @@ namespace UIKit
             }
         }
 
-        public void PopAllScreens()
+        public void PopAllScreens(UIKScreenTransition _transition = null)
         {
+            SetTransitionOverride(_transition);
             foreach (UIKScreenStack screenStack in GetScreenStacksOrdered().ToArray())
             {
                 foreach (UIKScreen screenInstance in screenStack.GetWidgetsOrdered().OfType<UIKScreen>().ToArray())
@@ -296,6 +560,15 @@ namespace UIKit
                     screenStack.PopFromStack(screenInstance);
                     OnPostScreenPopped();
                 }
+            }
+        }
+
+        // The last transition asked for this frame wins
+        private void SetTransitionOverride(UIKScreenTransition _transition)
+        {
+            if (_transition)
+            {
+                transitionOverride = _transition;
             }
         }
 
@@ -365,6 +638,8 @@ namespace UIKit
                     screenStackByLayer.Add(_layer, screenStack);
                     
                     screenStack.OnStackChanged.AddListener(ScreenStack_OnStackChanged);
+                    screenStack.OnScreenOpened.AddListener(ScreenStack_OnScreenOpened);
+                    screenStack.OnScreenClosed.AddListener(ScreenStack_OnScreenClosed);
                 }
                 
                 UpdateScreenStacks();

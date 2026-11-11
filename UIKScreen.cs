@@ -31,15 +31,31 @@ namespace UIKit
     }
     
     [RequireComponent(typeof(CanvasGroup))]
-    public abstract class UIKScreen : UIKWidget, UIKInputActionHandler
+    public abstract class UIKScreen : UIKWidget, UIKInputActionHandler, UIKScreenMotionBodySource
     {
         [SerializeField] public UIKScreenInputType inputType;
         [SerializeField] public UIKScreenLowerScreenVisibility lowerScreenVisibility;
         [SerializeField] public UIKInputAction backInputAction;
         [SerializeField] public UIKElement firstTarget;
-        
+        [SerializeField] public List<string> transitionCategories = new();
+
         protected Dictionary<UIKInputAction, List<UIKButton>> buttonByAction = new();
         protected Dictionary<UIKInputAction, List<UIKActionTrigger>> triggerByAction = new();
+
+        public bool isClosing { get; private set; }
+        public bool isMoving => motionPlayer.isPlaying;
+        public bool isMotionWaiting => motionPlayer.isWaiting;
+        public bool isEntering { get; private set; }
+        public bool isVisible => GetCanvasGroup() is CanvasGroup canvasGroup
+            && canvasGroup.alpha > 0f;
+
+        private UIKScreenMotionPlayer motionPlayer => __motionPlayer ??= new UIKScreenMotionPlayer(this);
+        private UIKScreenMotionBody rootBody => __rootBody ??= new UIKScreenMotionBody((RectTransform)transform, GetCanvasGroup());
+
+        private UIKScreenMotionPlayer __motionPlayer;
+        private UIKScreenMotionBody __rootBody;
+        private bool stackHidden;
+        private bool awaitingTransition;
 
 
         protected override void OnPreConstruct(bool _isOnValidate)
@@ -141,6 +157,109 @@ namespace UIKit
         public CanvasGroup GetCanvasGroup()
         {
             return GetComponent<CanvasGroup>();
+        }
+
+        public void MarkClosing()
+        {
+            isClosing = true;
+            Deactivate();
+            if (GetCanvasGroup() is CanvasGroup canvasGroup)
+            {
+                canvasGroup.interactable = false;
+                canvasGroup.blocksRaycasts = false;
+            }
+        }
+
+        public void SetStackHidden(bool _hidden)
+        {
+            stackHidden = _hidden;
+            ApplyPose();
+        }
+
+        // Kept invisible from the push until the canvas picks its transition, so it never shows a frame early
+        public void SetAwaitingTransition()
+        {
+            awaitingTransition = true;
+            ApplyPose();
+        }
+
+        public void PlayOutgoingMotion(UIKScreenMotion _motion)
+        {
+            awaitingTransition = false;
+            isEntering = false;
+            motionPlayer.PlayTowardAway(_motion, isClosing);
+            ApplyPose();
+        }
+
+        public void PlayIncomingMotion(UIKScreenMotion _motion, float _startDelay, bool _fromAway)
+        {
+            awaitingTransition = false;
+            isEntering = true;
+            motionPlayer.PlayTowardRest(_motion, _startDelay, _fromAway);
+            ApplyPose();
+        }
+
+        public void SetRestPose()
+        {
+            awaitingTransition = false;
+            isEntering = false;
+            motionPlayer.SetRest();
+            ApplyPose();
+        }
+
+        public void SnapMotion()
+        {
+            isEntering = false;
+            motionPlayer.SnapToEnd();
+            ApplyPose();
+        }
+
+        public void SkipMotionDelay()
+        {
+            motionPlayer.SkipDelay();
+        }
+
+        public bool TickMotion(float _deltaTime)
+        {
+            bool finished = motionPlayer.Tick(_deltaTime);
+            if (finished)
+            {
+                isEntering = false;
+            }
+
+            ApplyPose();
+            return finished;
+        }
+
+        // Offsets are in parent sizes, so a resize moves a screen that's away to stay away
+        protected virtual void OnRectTransformDimensionsChange()
+        {
+            ApplyPose();
+        }
+
+        public void ApplyPose()
+        {
+            bool hidden = awaitingTransition
+                || (stackHidden && !motionPlayer.isPlaying);
+            rootBody.Apply(hidden);
+            IReadOnlyList<UIKScreenMotionBody> posedBodies = motionPlayer.posedBodies;
+            for (int i = 0; i < posedBodies.Count; i++)
+            {
+                if (posedBodies[i] != rootBody)
+                {
+                    posedBodies[i].Apply(false);
+                }
+            }
+        }
+
+        public IReadOnlyList<UIKScreenMotionBody> GetMotionBodies(string _group)
+        {
+            return UIKScreenMotionElement.CollectBodies(this, rootBody, _group);
+        }
+
+        public IReadOnlyList<UIKScreenMotionBody> GetAllMotionBodies()
+        {
+            return UIKScreenMotionElement.CollectAllBodies(this, rootBody);
         }
         
         public bool HandleInputAction(InputAction.CallbackContext _context)

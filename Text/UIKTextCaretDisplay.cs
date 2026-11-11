@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.TextCore;
 using UnityEngine.UI;
 
 namespace UIKit
@@ -9,12 +11,30 @@ namespace UIKit
         [SerializeField] protected TMP_Text text;
         [SerializeField] protected Graphic caret;
         [SerializeField] protected float blinkInterval = 0.5f;
+        [SerializeField] protected bool followLines;
+        [SerializeField] protected Color selectionColor = new(0.25f, 0.5f, 1f, 0.5f);
+        [SerializeField] protected bool scrollToCaret;
 
         private bool caretShown;
         private int caretIndex;
+        private int selectionStart;
+        private int selectionEnd;
         private float blinkStartTime;
         private Rect placedTextRect;
+        private float scroll;
+        private Vector2 baseTextPosition;
+        private readonly List<Image> selectionImages = new();
 
+
+        protected virtual void Awake()
+        {
+            // Typed text is shown as is: a typed tag would hide characters and shift every index after it
+            if (text)
+            {
+                text.richText = false;
+                baseTextPosition = text.rectTransform.anchoredPosition;
+            }
+        }
 
         protected virtual void Update()
         {
@@ -28,10 +48,11 @@ namespace UIKit
             if (text
                 && text.rectTransform.rect != placedTextRect)
             {
-                RefreshCaret();
+                Refresh();
             }
 
-            caret.enabled = Mathf.FloorToInt((Time.unscaledTime - blinkStartTime) / blinkInterval) % 2 == 0;
+            caret.enabled = selectionStart == selectionEnd
+                && Mathf.FloorToInt((Time.unscaledTime - blinkStartTime) / blinkInterval) % 2 == 0;
         }
 
 
@@ -42,7 +63,7 @@ namespace UIKit
                 text.SetText(_text);
             }
 
-            RefreshCaret();
+            Refresh();
         }
 
         public void SetCaret(bool _shown, int _index)
@@ -51,7 +72,92 @@ namespace UIKit
             caretIndex = _index;
             blinkStartTime = Time.unscaledTime;
 
+            Refresh();
+        }
+
+        public void SetSelection(int _start, int _end)
+        {
+            selectionStart = Mathf.Min(_start, _end);
+            selectionEnd = Mathf.Max(_start, _end);
+
+            Refresh();
+        }
+
+        public int GetIndexAt(Vector2 _screenPosition)
+        {
+            if (!text)
+            {
+                return 0;
+            }
+
+            text.ForceMeshUpdate();
+            TMP_TextInfo textInfo = text.textInfo;
+            if (textInfo.characterCount == 0
+                || textInfo.lineCount == 0)
+            {
+                return 0;
+            }
+
+            Canvas canvas = text.canvas ? text.canvas.rootCanvas : null;
+            Camera camera = canvas && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(text.rectTransform, _screenPosition, camera, out Vector2 point))
+            {
+                return 0;
+            }
+
+            int lineNumber = GetNearestLine(point.y);
+            TMP_LineInfo line = textInfo.lineInfo[lineNumber];
+            for (int i = line.firstCharacterIndex; i <= line.lastCharacterIndex; i++)
+            {
+                TMP_CharacterInfo character = textInfo.characterInfo[i];
+                if (point.x < (character.origin + character.xAdvance) * 0.5f)
+                {
+                    return i;
+                }
+            }
+
+            // Past the end of a wrapped line, the caret goes before the space it wrapped at, so it stays on this line
+            bool lastLine = lineNumber == textInfo.lineCount - 1;
+            if (!lastLine
+                && char.IsWhiteSpace(textInfo.characterInfo[line.lastCharacterIndex].character))
+            {
+                return line.lastCharacterIndex;
+            }
+
+            return line.lastCharacterIndex + 1;
+        }
+
+        private int GetNearestLine(float _y)
+        {
+            TMP_TextInfo textInfo = text.textInfo;
+            int nearest = 0;
+            float nearestDistance = float.MaxValue;
+            for (int i = 0; i < textInfo.lineCount; i++)
+            {
+                TMP_LineInfo line = textInfo.lineInfo[i];
+                float distance = _y > line.ascender ? _y - line.ascender : _y < line.descender ? line.descender - _y : 0f;
+                if (distance < nearestDistance)
+                {
+                    nearest = i;
+                    nearestDistance = distance;
+                }
+            }
+
+            return nearest;
+        }
+
+        private void Refresh()
+        {
+            if (!text)
+            {
+                return;
+            }
+
+            placedTextRect = text.rectTransform.rect;
+            text.ForceMeshUpdate();
+            RefreshScroll();
             RefreshCaret();
+            RefreshSelection();
         }
 
         private void RefreshCaret()
@@ -61,36 +167,155 @@ namespace UIKit
                 return;
             }
 
-            caret.enabled = caretShown;
-            if (!caretShown
-                || !text)
+            caret.enabled = caretShown
+                && selectionStart == selectionEnd;
+            if (!caretShown)
             {
                 return;
             }
 
-            placedTextRect = text.rectTransform.rect;
-            text.ForceMeshUpdate();
-            Vector3 caretWorldPosition = text.rectTransform.TransformPoint(new Vector3(GetCaretX(), 0f, 0f));
+            GetCaretPlacement(out float caretX, out float lineCenterY, out _);
+            Vector3 caretWorldPosition = text.rectTransform.TransformPoint(new Vector3(caretX, followLines ? lineCenterY : 0f, 0f));
             Vector3 caretPosition = caret.rectTransform.localPosition;
-            caretPosition.x = caret.rectTransform.parent.InverseTransformPoint(caretWorldPosition).x;
+            Vector3 caretParentPosition = caret.rectTransform.parent.InverseTransformPoint(caretWorldPosition);
+            caretPosition.x = caretParentPosition.x;
+            if (followLines)
+            {
+                caretPosition.y = caretParentPosition.y;
+            }
             caret.rectTransform.localPosition = caretPosition;
         }
 
-        // In the text's local space
-        private float GetCaretX()
+        private void RefreshScroll()
+        {
+            if (!scrollToCaret)
+            {
+                return;
+            }
+
+            TMP_TextInfo textInfo = text.textInfo;
+            Rect rect = text.rectTransform.rect;
+            float windowTop = rect.yMax - text.margin.y;
+            float windowBottom = rect.yMin + text.margin.w;
+            float newScroll = 0f;
+            if (caretShown
+                && textInfo.lineCount > 0)
+            {
+                float contentTop = textInfo.lineInfo[0].ascender;
+                float contentBottom = textInfo.lineInfo[textInfo.lineCount - 1].descender;
+                if (contentTop - contentBottom > windowTop - windowBottom)
+                {
+                    GetCaretPlacement(out _, out _, out TMP_LineInfo caretLine);
+                    newScroll = Mathf.Clamp(scroll, windowBottom - caretLine.descender, windowTop - caretLine.ascender);
+                    newScroll = Mathf.Clamp(newScroll, windowTop - contentTop, windowBottom - contentBottom);
+                }
+            }
+
+            scroll = newScroll;
+            text.rectTransform.anchoredPosition = baseTextPosition + new Vector2(0f, scroll);
+        }
+
+        private void RefreshSelection()
+        {
+            int imageCount = 0;
+            TMP_TextInfo textInfo = text.textInfo;
+            int end = Mathf.Min(selectionEnd, textInfo.characterCount);
+            if (caretShown
+                && selectionStart < end)
+            {
+                for (int lineNumber = 0; lineNumber < textInfo.lineCount; lineNumber++)
+                {
+                    TMP_LineInfo line = textInfo.lineInfo[lineNumber];
+                    int first = Mathf.Max(selectionStart, line.firstCharacterIndex);
+                    int last = Mathf.Min(end - 1, line.lastCharacterIndex);
+                    if (first > last)
+                    {
+                        continue;
+                    }
+
+                    float xMin = textInfo.characterInfo[first].origin;
+                    float xMax = textInfo.characterInfo[last].xAdvance;
+                    PlaceSelectionImage(imageCount, new Rect(xMin, line.descender, xMax - xMin, line.ascender - line.descender));
+                    imageCount++;
+                }
+            }
+
+            for (int i = imageCount; i < selectionImages.Count; i++)
+            {
+                if (selectionImages[i])
+                {
+                    selectionImages[i].enabled = false;
+                }
+            }
+        }
+
+        private void PlaceSelectionImage(int _index, Rect _rect)
+        {
+            while (selectionImages.Count <= _index)
+            {
+                GameObject imageObject = new("Selection", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+                imageObject.GetComponent<LayoutElement>().ignoreLayout = true;
+                imageObject.transform.SetParent(text.rectTransform.parent, false);
+                Image newImage = imageObject.GetComponent<Image>();
+                newImage.raycastTarget = false;
+                selectionImages.Add(newImage);
+            }
+
+            Image image = selectionImages[_index];
+            image.color = selectionColor;
+            image.enabled = true;
+
+            RectTransform imageTransform = image.rectTransform;
+            int textSiblingIndex = text.rectTransform.GetSiblingIndex();
+            if (imageTransform.GetSiblingIndex() > textSiblingIndex)
+            {
+                imageTransform.SetSiblingIndex(textSiblingIndex);
+            }
+
+            Transform parent = imageTransform.parent;
+            Vector3 min = parent.InverseTransformPoint(text.rectTransform.TransformPoint(_rect.min));
+            Vector3 max = parent.InverseTransformPoint(text.rectTransform.TransformPoint(_rect.max));
+            imageTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            imageTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            imageTransform.pivot = new Vector2(0.5f, 0.5f);
+            imageTransform.sizeDelta = new Vector2(Mathf.Abs(max.x - min.x), Mathf.Abs(max.y - min.y));
+            imageTransform.localPosition = (min + max) * 0.5f;
+        }
+
+        private void GetCaretPlacement(out float _x, out float _lineCenterY, out TMP_LineInfo _line)
         {
             TMP_TextInfo textInfo = text.textInfo;
             int count = Mathf.Min(caretIndex, textInfo.characterCount);
-            if (count > 0)
+            if (textInfo.characterCount == 0
+                || textInfo.lineCount == 0)
             {
-                return textInfo.characterInfo[count - 1].xAdvance;
+                _x = GetEmptyCaretX();
+                _lineCenterY = GetEmptyLineCenterY();
+                _line = default;
+                _line.ascender = _lineCenterY;
+                _line.descender = _lineCenterY;
+                return;
             }
 
-            if (textInfo.characterCount > 0)
+            if (count < textInfo.characterCount
+                && (count == 0 || textInfo.characterInfo[count].lineNumber != textInfo.characterInfo[count - 1].lineNumber))
             {
-                return textInfo.characterInfo[0].origin;
+                TMP_CharacterInfo character = textInfo.characterInfo[count];
+                _x = character.origin;
+                _line = textInfo.lineInfo[character.lineNumber];
+            }
+            else
+            {
+                TMP_CharacterInfo previous = textInfo.characterInfo[count - 1];
+                _x = previous.xAdvance;
+                _line = textInfo.lineInfo[previous.lineNumber];
             }
 
+            _lineCenterY = (_line.ascender + _line.descender) * 0.5f;
+        }
+
+        private float GetEmptyCaretX()
+        {
             Rect rect = text.rectTransform.rect;
             switch (text.horizontalAlignment)
             {
@@ -100,6 +325,31 @@ namespace UIKit
                     return rect.xMax - text.margin.z;
                 default:
                     return rect.center.x;
+            }
+        }
+
+        // Where the first line would sit, from the font's line metrics, since empty text has no lines to read
+        private float GetEmptyLineCenterY()
+        {
+            Rect rect = text.rectTransform.rect;
+            float top = rect.yMax - text.margin.y;
+            float bottom = rect.yMin + text.margin.w;
+            if (!text.font)
+            {
+                return (top + bottom) * 0.5f;
+            }
+
+            FaceInfo faceInfo = text.font.faceInfo;
+            float scale = text.fontSize / faceInfo.pointSize * faceInfo.scale;
+            float lineHeight = (faceInfo.ascentLine - faceInfo.descentLine) * scale;
+            switch (text.verticalAlignment)
+            {
+                case VerticalAlignmentOptions.Top:
+                    return top - lineHeight * 0.5f;
+                case VerticalAlignmentOptions.Bottom:
+                    return bottom + lineHeight * 0.5f;
+                default:
+                    return (top + bottom) * 0.5f;
             }
         }
     }

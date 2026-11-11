@@ -32,9 +32,10 @@ namespace UIKit
             foreach (Transform child in transform)
             {
                 if (child.GetComponent<UIKWidget>() is UIKWidget widget
-                    && widget == _widget)
+                    && widget == _widget
+                    && !IsLeaving(widget))
                 {
-                    widget.gameObject.SafeDestroy();
+                    RemoveWidget(widget);
                     UpdateWidgetsInStack();
 
                     return true;
@@ -46,11 +47,12 @@ namespace UIKit
 
         public virtual bool PopStack()
         {
-            if (transform.childCount > 0)
+            foreach (Transform child in transform)
             {
-                if (transform.GetChild(0).GetComponent<UIKWidget>() is UIKWidget widget)
+                if (child.GetComponent<UIKWidget>() is UIKWidget widget
+                    && !IsLeaving(widget))
                 {
-                    widget.gameObject.SafeDestroy();
+                    RemoveWidget(widget);
                     UpdateWidgetsInStack();
 
                     return true;
@@ -64,9 +66,10 @@ namespace UIKit
         {
             foreach (Transform child in transform)
             {
-                if (child.GetComponent<UIKWidget>() is UIKWidget widget)
+                if (child.GetComponent<UIKWidget>() is UIKWidget widget
+                    && !IsLeaving(widget))
                 {
-                    widget.gameObject.SafeDestroy();
+                    RemoveWidget(widget);
                 }
             }
             
@@ -108,7 +111,8 @@ namespace UIKit
                     continue;
                 }
 
-                if (child.GetComponent<UIKWidget>() is UIKWidget widget)
+                if (child.GetComponent<UIKWidget>() is UIKWidget widget
+                    && !IsLeaving(widget))
                 {
                     widgetsInStack.Add(widget);
                 }
@@ -135,6 +139,16 @@ namespace UIKit
             }
             
             OnStackChanged.Invoke();
+        }
+
+        protected virtual bool IsLeaving(UIKWidget _widget)
+        {
+            return false;
+        }
+
+        protected virtual void RemoveWidget(UIKWidget _widget)
+        {
+            _widget.gameObject.SafeDestroy();
         }
 
         protected virtual UIKWidget TryInstantiateWidget(GameObject _widgetPrefab, Transform _parentTransform)
